@@ -1,0 +1,6 @@
+.idea/
+.env
+venv/
+*.ipynb
+
+.shared/
