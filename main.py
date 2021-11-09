@@ -29,6 +29,25 @@ def send_discord(payload):
 
     return response
 
+
+#fetch whales to mark their trades
+def fetch_whales(since_hash=None):
+
+    whaleSize = 100000 #size threshold
+    whaleSize = whaleSize * 1e18 #convert using mantissa
+    global whales
+    whales = []
+    ovens = requests.get(
+            'https://kolibri-data.s3.amazonaws.com/mainnet/oven-data.json'
+        )
+
+
+    for oven in ovens.json()['allOvenData']:
+        if int(float(oven['outstandingTokens'])) > whaleSize:
+            whales.append(oven['ovenOwner'])
+
+
+    
 def fetch_contract_activity(since_hash=None):
     params = {
         'token_id': 0,
@@ -75,18 +94,29 @@ def handle_new_transfers(transfers):
                 'https://better-call.dev/mainnet/opg/{}'.format(tx['hash'])
             )
 
+            if tx['from'] in whales:
+                payload["content"] = payload["content"] + " :whale:"
+                
+
         elif tx['parent'] == 'tezToTokenPayment':
             payload["content"] = "<:quipuswap:906262514197749831> {} bought :chart_with_upwards_trend: **{:,} kUSD** - **[TX](<{}>)**".format(
                 '**[{}](<https://tzkt.io/{}>)**'.format(shorten_address(tx['to']), tx['to']),
                 round(int(tx['amount']) / 1e18, 2),
                 'https://better-call.dev/mainnet/opg/{}'.format(tx['hash'])
             )
+
+            if tx['to'] in whales:
+                payload["content"] = payload["content"] + " :whale:"
         else:
             continue
 
         send_discord(payload)
 
 def watch_for_changes():
+
+    fetch_whales()
+    
+    
     if os.path.exists('.shared/previous-state.json'):
         print("Found .shared/previous-state.json, bootstrapping from that!")
         with open('.shared/previous-state.json') as f:
