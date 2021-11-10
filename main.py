@@ -31,7 +31,7 @@ def send_discord(payload):
 
 
 #fetch whales to mark their trades
-def fetch_whales(since_hash=None):
+def fetch_whales():
 
     whaleSize = 100000 #size threshold
     whaleSize = whaleSize * 1e18 #convert using mantissa
