@@ -32,11 +32,9 @@ def send_discord(payload):
 
 #fetch whales to mark their trades
 def fetch_whales():
-
+    
     whaleSize = 100000 #size threshold
     whaleSize = whaleSize * 1e18 #convert using mantissa
-    global whales
-    whales = []
     ovens = requests.get(
             'https://kolibri-data.s3.amazonaws.com/mainnet/oven-data.json'
         )
@@ -112,11 +110,12 @@ def handle_new_transfers(transfers):
 
         send_discord(payload)
 
+whales = [] #define whale variable for use between functions
+
 def watch_for_changes():
 
     fetch_whales()
-    
-    
+        
     if os.path.exists('.shared/previous-state.json'):
         print("Found .shared/previous-state.json, bootstrapping from that!")
         with open('.shared/previous-state.json') as f:
