@@ -167,11 +167,9 @@ def handle_new_transfers(transfers):
             else:
                 continue
 
-        channel = DISCORD_WEBHOOK
+        send_discord(payload, DISCORD_WEBHOOK)
         if int(tx['amount']) / 1e18 >= 5000 and DISCORD_WEBHOOK_WHALES is not None:
-            channel = DISCORD_WEBHOOK_WHALES
-
-        send_discord(payload,channel)
+            send_discord(payload, DISCORD_WEBHOOK_WHALES)
 
 def watch_for_changes():
     if os.path.exists('.shared/previous-state.json'):
