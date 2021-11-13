@@ -19,9 +19,18 @@ try:
 except KeyError as e:
     raise Exception("DISCORD_WEBHOOK envar not found! You must set a DISCORD_WEBHOOK for things to work properly.")
 
-def send_discord(payload):
+DISCORD_WEBHOOK_WHALES = None
+try:
+    DISCORD_WEBHOOK_WHALES = os.environ["DISCORD_WEBHOOK_WHALES"]
+    if len(DISCORD_WEBHOOK_WHALES) < 5:
+        raise KeyError
+except KeyError as e:
+    print ("DISCORD_WEBHOOK_WHALES envar not found! Whale trades will not be separated.")
+    pass
+
+def send_discord(payload,channel):
     print("Submitting webhook...")
-    response = requests.post(DISCORD_WEBHOOK, json=payload)
+    response = requests.post(channel, json=payload)
     response.raise_for_status()
     if int(response.headers['x-ratelimit-remaining']) == 0:
         rate_limit_reset = float(response.headers['x-ratelimit-reset-after']) + 1
@@ -33,7 +42,7 @@ def send_discord(payload):
     return response
 
 
-#fetch whales to mark their trades
+#fetch whales with large ovens to mark their trades
 def fetch_whales():
     
     whaleSize = 100000 #size threshold
@@ -48,13 +57,45 @@ def fetch_whales():
             whales.append(oven['ovenOwner'])
 
 
+def fetch_usdtz_plenty_activity(since_hash=None):
+    params = {
+        "token_id": 0,
+        "size": 10,
+        "contracts": "KT1K9gCRgaLRFKTErYt1wVxA3Frb9FjasjTV",
+    }
+    
+    transfers = []
 
+    last_id = None
+
+    while True:
+        if last_id is not None:
+            params['last_id'] = last_id
+
+        response = requests.get(
+            'https://api.better-call.dev/v1/tokens/mainnet/transfers/KT1TnsQ6JqzyTz5PHMsGj28WwJyBtgc146aJ',
+            params=params
+        )
+
+        applied_ops = response.json()
+
+        last_id = applied_ops['last_id']
+
+
+        for operation in applied_ops['transfers']:
+            if operation['hash'] == since_hash:
+                return transfers
+            if operation['status'] == 'applied':
+                transfers.append(operation)
+
+        if since_hash is None:
+            return transfers
+        
 def fetch_plenty_activity(since_hash=None):
     params = {
-        'token_id': 0,
-        'size': 10,
-        'contracts': 'KT1K9gCRgaLRFKTErYt1wVxA3Frb9FjasjTV',
-        'status': 'applied',
+        "token_id": 0,
+        "size": 10,
+        "contracts": "KT1K9gCRgaLRFKTErYt1wVxA3Frb9FjasjTV",
     }
 
     transfers = []
@@ -71,27 +112,25 @@ def fetch_plenty_activity(since_hash=None):
         )
 
         applied_ops = response.json()
-
         last_id = applied_ops['last_id']
-
 
         for operation in applied_ops['transfers']:
             if operation['hash'] == since_hash:
                 return transfers
-            transfers.append(operation)
-
+            if operation['status'] == 'applied':
+                transfers.append(operation)
+            
         if since_hash is None:
             return transfers
   
         
 def fetch_quipuswap_activity(since_hash=None):
     params = {
-        'token_id': 0,
-        'size': 10,
-        'contracts': 'KT1K9gCRgaLRFKTErYt1wVxA3Frb9FjasjTV',
-        'status': 'applied',
+        "token_id": 0,
+        "size": 10,
+        "contracts": "KT1K9gCRgaLRFKTErYt1wVxA3Frb9FjasjTV",
     }
-
+    
     transfers = []
 
     last_id = None
@@ -112,7 +151,8 @@ def fetch_quipuswap_activity(since_hash=None):
         for operation in applied_ops['transfers']:
             if operation['hash'] == since_hash:
                 return transfers
-            transfers.append(operation)
+            if operation['status'] == 'applied':
+                transfers.append(operation)
 
         if since_hash is None:
             return transfers
@@ -120,14 +160,16 @@ def fetch_quipuswap_activity(since_hash=None):
 
 latest_quipu_ophash = None
 latest_plenty_ophash = None
+latest_usdtz_plenty_ophash = None
 
-def fetch_all_new_transfers(quipuhash,plentyhash):
+def fetch_all_new_transfers(quipuhash,plentyhash,usdtzhash):
     all_transfers = []
     
     new_quipu_transfers = fetch_quipuswap_activity(since_hash=quipuhash)
     new_plenty_transfers = fetch_plenty_activity(since_hash=plentyhash)
-
-    all_transfers = new_quipu_transfers + new_plenty_transfers
+    new_usdtz_plenty_transfers = fetch_usdtz_plenty_activity(since_hash=usdtzhash)
+    
+    all_transfers = new_quipu_transfers + new_plenty_transfers + new_usdtz_plenty_transfers
 
     try:
         latest_quipu_ophash = new_quipu_transfers[0]['hash']
@@ -137,16 +179,21 @@ def fetch_all_new_transfers(quipuhash,plentyhash):
         latest_plenty_ophash = new_plenty_transfers[0]['hash']
     except IndexError:
         latest_plenty_ophash = plentyhash
+    try:
+        latest_usdtz_plenty_ophash = new_usdtz_plenty_transfers[0]['hash']
+    except IndexError:
+       latest_usdtz_plenty_ophash = usdtzhash
     
-    return all_transfers, latest_quipu_ophash, latest_plenty_ophash
+    return all_transfers, latest_quipu_ophash, latest_plenty_ophash, latest_usdtz_plenty_ophash
 
 def shorten_address(address):
     return address[:5] + "..." + address[-5:]
 
 def handle_new_transfers(transfers):
-    
 
-    #quipuswap trades
+    
+    
+    #xtz/kusd trades on quipuswap
     for tx in transfers:
         payload = {}
         if tx['parent'] == 'tokenToTezPayment':
@@ -169,41 +216,86 @@ def handle_new_transfers(transfers):
 
             if tx['to'] in whales:
                 payload["content"] = payload["content"] + " :whale:"
+            
         else:
             continue
-        
-        send_discord(payload)
+
+        channel = DISCORD_WEBHOOK
+        if int(tx['amount']) / 1e18 >= 5000 and DISCORD_WEBHOOK_WHALES is not None:
+            channel = DISCORD_WEBHOOK_WHALES
+         
+        send_discord(payload,channel)
 
 
-    #plenty trades
+    #plenty/kusd trades on plenty
     for tx in transfers:
         payload_plenty = {}
-        if tx['parent'] == 'Swap' and tx['from'] != 'KT1UNBvCJXiwJY6tmHM7CJUVwNPew53XkSfh':
-            payload_plenty["content"] = "<:plenty:897260943090798622> {} sold :chart_with_downwards_trend: **{:,} kUSD** - **[TX](<{}>)**".format(
-                '**[{}](<https://tzkt.io/{}>)**'.format(shorten_address(tx['from']), tx['from']),
-                round(int(tx['amount']) / 1e18, 2),
-                'https://better-call.dev/mainnet/opg/{}'.format(tx['hash'])
-            )
+        if tx['from'] == 'KT1UNBvCJXiwJY6tmHM7CJUVwNPew53XkSfh' or tx['to'] == 'KT1UNBvCJXiwJY6tmHM7CJUVwNPew53XkSfh':      #if it is plenty/kusd contract
+            if tx['parent'] == 'Swap' and tx['from'] != 'KT1UNBvCJXiwJY6tmHM7CJUVwNPew53XkSfh':
+                payload_plenty["content"] = "<:plenty:897260943090798622> {} sold :chart_with_downwards_trend: **{:,} kUSD** for **PLENTY** - **[TX](<{}>)**".format(
+                    '**[{}](<https://tzkt.io/{}>)**'.format(shorten_address(tx['from']), tx['from']),
+                    round(int(tx['amount']) / 1e18, 2),
+                    'https://better-call.dev/mainnet/opg/{}'.format(tx['hash'])
+                )
 
-            if tx['from'] in whales:
-                payload_plenty["content"] = payload_plenty["content"] + " :whale:"
+                if tx['from'] in whales:
+                    payload_plenty["content"] = payload_plenty["content"] + " :whale:"
                 
 
-        elif tx['parent'] == 'Swap':
-            payload_plenty["content"] = "<:plenty:897260943090798622> {} bought :chart_with_upwards_trend: **{:,} kUSD** - **[TX](<{}>)**".format(
-                '**[{}](<https://tzkt.io/{}>)**'.format(shorten_address(tx['to']), tx['to']),
-                round(int(tx['amount']) / 1e18, 2),
-                'https://better-call.dev/mainnet/opg/{}'.format(tx['hash'])
-            )
+            elif tx['parent'] == 'Swap':
+                payload_plenty["content"] = "<:plenty:897260943090798622> {} bought :chart_with_upwards_trend: **{:,} kUSD** with **PLENTY** - **[TX](<{}>)**".format(
+                    '**[{}](<https://tzkt.io/{}>)**'.format(shorten_address(tx['to']), tx['to']),
+                    round(int(tx['amount']) / 1e18, 2),
+                    'https://better-call.dev/mainnet/opg/{}'.format(tx['hash'])
+                )
 
-            if tx['to'] in whales:
-                payload_plenty["content"] = payload_plenty["content"] + " :whale:"
-        else:
-            continue
+                if tx['to'] in whales:
+                    payload_plenty["content"] = payload_plenty["content"] + " :whale:"
+                    
 
-        send_discord(payload_plenty)
+                
+            else:
+                continue
 
-        
+            channel = DISCORD_WEBHOOK
+            if int(tx['amount']) / 1e18 >= 5000 and DISCORD_WEBHOOK_WHALES is not None:
+                channel = DISCORD_WEBHOOK_WHALES
+            
+            send_discord(payload_plenty,channel)
+
+    #usdtz/kusd trades on plenty
+    for tx in transfers:
+        payload_usdtz_plenty = {}
+        if tx['from'] == 'KT1TnsQ6JqzyTz5PHMsGj28WwJyBtgc146aJ' or tx['to'] == 'KT1TnsQ6JqzyTz5PHMsGj28WwJyBtgc146aJ':      #if it is usdtz/kusd contract
+            if tx['parent'] == 'Swap' and tx['from'] != 'KT1TnsQ6JqzyTz5PHMsGj28WwJyBtgc146aJ':
+                payload_usdtz_plenty["content"] = "<:plenty:897260943090798622> {} sold :chart_with_downwards_trend: **{:,} kUSD** for **USDtz** - **[TX](<{}>)**".format(
+                    '**[{}](<https://tzkt.io/{}>)**'.format(shorten_address(tx['from']), tx['from']),
+                    round(int(tx['amount']) / 1e18, 2),
+                    'https://better-call.dev/mainnet/opg/{}'.format(tx['hash'])
+                )
+
+                if tx['from'] in whales:
+                    payload_usdtz_plenty["content"] = payload_usdtz_plenty["content"] + " :whale:"
+                    
+
+            elif tx['parent'] == 'Swap':
+                payload_usdtz_plenty["content"] = "<:plenty:897260943090798622> {} bought :chart_with_upwards_trend: **{:,} kUSD** with **USDtz** - **[TX](<{}>)**".format(
+                    '**[{}](<https://tzkt.io/{}>)**'.format(shorten_address(tx['to']), tx['to']),
+                    round(int(tx['amount']) / 1e18, 2),
+                    'https://better-call.dev/mainnet/opg/{}'.format(tx['hash'])
+                )
+
+                if tx['to'] in whales:
+                    payload_usdtz_plenty["content"] = payload_usdtz_plenty["content"] + " :whale:"
+                
+            else:
+                continue
+
+            channel = DISCORD_WEBHOOK
+            if int(tx['amount']) / 1e18 >= 5000 and DISCORD_WEBHOOK_WHALES is not None:
+                channel = DISCORD_WEBHOOK_WHALES
+             
+            send_discord(payload_usdtz_plenty,channel)        
 
 
 def watch_for_changes():
@@ -217,16 +309,24 @@ def watch_for_changes():
             print("Previous state - {}".format(previous_state))
             latest_quipu_ophash = previous_state['latest-quipu-hash']
             latest_plenty_ophash = previous_state['latest-plenty-hash']
+            latest_usdtz_plenty_ophash = previous_state['latest-usdtz-plenty-hash']
     else:
         print("No previous state found! Starting fresh...")
         bcd_payload_quipu = fetch_quipuswap_activity()
         bcd_payload_plenty = fetch_plenty_activity()
+        bcd_payload_usdtz_plenty = fetch_usdtz_plenty_activity()
         latest_quipu_ophash = bcd_payload_quipu[0]['hash']
         latest_plenty_ophash = bcd_payload_plenty[0]['hash']
+        latest_usdtz_plenty_ophash = bcd_payload_usdtz_plenty[0]['hash']
 
     while True:
         try:
-            new_transfers, latest_quipu_ophash, latest_plenty_ophash = fetch_all_new_transfers(latest_quipu_ophash,latest_plenty_ophash)
+            new_transfers, latest_quipu_ophash, latest_plenty_ophash, latest_usdtz_plenty_ophash = fetch_all_new_transfers(
+                latest_quipu_ophash,
+                latest_plenty_ophash,
+                latest_usdtz_plenty_ophash
+                )
+            
         except Exception as exc:
             print("Exception processing contract activity! Sleeping for a bit and trying again...", exc)
             time.sleep(10)
@@ -242,6 +342,7 @@ def watch_for_changes():
                 payload = json.dumps({
                     "latest-quipu-hash": latest_quipu_ophash,
                     "latest-plenty-hash": latest_plenty_ophash,
+                    "latest-usdtz-plenty-hash": latest_usdtz_plenty_ophash,
                     "updated": str(datetime.now())
                 })
                 f.write(payload)
