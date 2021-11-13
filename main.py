@@ -190,7 +190,7 @@ def watch_for_changes():
 
     while True:
         try:
-            (new_quipu_transfers, latest_quipu_ophash) = fetch_contract_transfers(QUIPU_KUSD, since_hash=latest_quipu_ophash)
+            new_quipu_transfers, latest_quipu_ophash = fetch_contract_transfers(QUIPU_KUSD, since_hash=latest_quipu_ophash)
 
             new_plenty_transfers, latest_plenty_ophash = fetch_contract_transfers(PLENTY_KUSD, since_hash=latest_plenty_ophash)
 
