@@ -10,5 +10,6 @@ run:
 	docker run --rm -it \
 	    -v $$(pwd):/shared --workdir /shared \
 	    -e DISCORD_WEBHOOK=$(DISCORD_WEBHOOK) \
+	    -e DISCORD_WEBHOOK_WHALES=$(DISCORD_WEBHOOK_WHALES) \
 	    kolibri-quipu-tradebot \
 	    python3 /shared/main.py
