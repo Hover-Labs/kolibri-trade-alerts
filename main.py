@@ -30,8 +30,16 @@ except KeyError as e:
 
 def send_discord(payload,channel):
     print("Submitting webhook...")
-    response = requests.post(channel, json=payload)
-    response.raise_for_status()
+
+    while True:
+        try:
+            response = requests.post(channel, json=payload)
+            response.raise_for_status()
+            break
+        except Exception as e:
+            print("Rate limit presumably hit! Sleeping for 30s and trying again...", e)
+            time.sleep(30)
+
     if int(response.headers['x-ratelimit-remaining']) == 0:
         rate_limit_reset = float(response.headers['x-ratelimit-reset-after']) + 1
         print("Waiting for discord rate limits...({} sec)".format(rate_limit_reset))
