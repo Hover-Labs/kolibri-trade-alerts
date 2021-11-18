@@ -86,7 +86,10 @@ def fetch_contract_transfers(contract_address, since_hash=None):
 
         for operation in applied_ops['transfers']:
             if operation['hash'] == since_hash:
-                return transfers, applied_ops['transfers'][0]['hash']
+                if len(transfers) != 0:
+                    return transfers, transfers[0]['hash']
+                else:
+                    return transfers, applied_ops['transfers'][0]['hash']
             if operation['status'] == 'applied':
                 transfers.append(operation)
 
